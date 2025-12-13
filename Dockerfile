@@ -33,6 +33,9 @@ RUN groupadd -g ${GID} -o ${UNAME} && \
 
 USER ${UNAME}
 
+ENV PATH="/home/pythonuser/.local/bin:$PATH"
+ENV PYTHONPATH=${PYTHONPATH:+${PYTHONPATH}:}/app
+
 COPY --chown=${UID}:${GID} requirements.txt /
 RUN pip3 install --no-cache-dir --upgrade -r /requirements.txt
 
@@ -59,9 +62,6 @@ ENV BUILDTIME=$buildtime
 
 ARG forwarded_allow_ips=*
 ENV FORWARDED_ALLOW_IPS=$forwarded_allow_ips
-
-ENV PATH="/home/pythonuser/.local/bin:$PATH"
-ENV PYTHONPATH=${PYTHONPATH:+${PYTHONPATH}:}/app
 
 # ENV TINI_SUBREAPER=yes
 # ENV TINI_KILL_PROCESS_GROUP=yes
