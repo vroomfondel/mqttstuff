@@ -86,7 +86,7 @@ pypibuild: venv dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-n
 dist/.touchfile_push: dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl
 	@$(venv_activated)
 	# python3 -m twine upload --repository pypi dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl
-	hatch publish -r test
+	hatch publish -r main
 	@touch dist/.touchfile_push
 
 pypipush: venv dist/.touchfile_push
