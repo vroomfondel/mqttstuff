@@ -2,6 +2,7 @@
 [![BuildAndPushMultiarch](https://github.com/vroomfondel/mqttstuff/actions/workflows/buildmultiarchandpush.yml/badge.svg)](https://github.com/vroomfondel/mqttstuff/actions/workflows/buildmultiarchandpush.yml)
 ![Cumulative Clones](https://img.shields.io/endpoint?logo=github&url=https://gist.githubusercontent.com/vroomfondel/8a315c36125952c9976548dfbf45cb7b/raw/mqttstuff_clone_count.json)
 [![Docker Pulls](https://img.shields.io/docker/pulls/xomoxcc/mqttstuff?logo=docker)](https://hub.docker.com/r/xomoxcc/mqttstuff/tags)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/mqttstuff?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=PyPi+Downloads)](https://pepy.tech/projects/mqttstuff)
 
 [![https://github.com/vroomfondel/mqttstuff/raw/main/Gemini_Generated_Image_mqttstuff_wjpr8gwjpr8gwjpr_250x250.png](https://github.com/vroomfondel/mqttstuff/raw/main/Gemini_Generated_Image_mqttstuff_wjpr8gwjpr8gwjpr_250x250.png)](https://github.com/vroomfondel/mqttstuff)
 
