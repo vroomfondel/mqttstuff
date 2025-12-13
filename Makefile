@@ -1,4 +1,4 @@
-.PHONY: tests help install venv lint dstart isort tcheck build build-psql commit-checks prepare pypibuild pypipush
+.PHONY: tests help install venv lint dstart isort tcheck build commit-checks prepare pypibuild pypipush
 SHELL := /usr/bin/bash
 .ONESHELL:
 
