@@ -13,9 +13,6 @@ help:
 	@printf "\ncommit-checks\n\trun pre-commit checks on all files\n"
 	@printf "\pypibuild \n\tbuild image package for pypi\n"
 	@printf "\pypipush \n\push package to pypi\n"
-	@printf "\nbuild \n\tbuild docker image\n"
-	@printf "\ndstart \n\tlaunch \"app\" in docker\n"
-
 
 
 
@@ -26,11 +23,11 @@ install: venv
 
 venv: .venv/touchfile
 
-.venv/touchfile: requirements.txt requirements-dev.txt
+.venv/touchfile: requirements.txt requirements-dev.txt requirements-build.txt
 	@if [ -z "$${GITHUB_RUN_ID}" ]; then \
 		test -d .venv || python3.14 -m venv .venv; \
 		source .venv/bin/activate; \
-		pip install -r requirements-dev.txt; \
+		pip install -r requirements-build.txt; \
 		touch .venv/touchfile; \
 	else \
   		echo "Skipping venv setup because GITHUB_RUN_ID is set"; \
@@ -51,7 +48,7 @@ isort: venv
 
 tcheck: venv
 	@$(venv_activated)
-	mypy *.py scripts mqttstuff mqttcommander
+	mypy *.py scripts mqttstuff
 
 
 .git/hooks/pre-commit: venv
@@ -64,10 +61,11 @@ commit-checks: .git/hooks/pre-commit
 
 prepare: tests commit-checks
 
-mqttstuff_SOURCES := mqttcommander/*.py mqttstuff/*.py
+mqttstuff_SOURCES := mqttstuff/*.py
 VENV_DEPS := requirements.txt requirements-dev.txt requirements-build.txt
 
-VERSION := $(shell egrep -m 1 ^version pyproject.toml | tr -s ' ' | tr -d '"' | tr -d "'" | tr -d " " | cut -d'=' -f2)
+# VERSION := $(shell egrep -m 1 ^version pyproject.toml | tr -s ' ' | tr -d '"' | tr -d "'" | tr -d " " | cut -d'=' -f2)
+VERSION := $(shell hatch version)
 
 dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl dist/.touchfile: $(mqttstuff_mqttstuff) $(VENV_DEPS) pyproject.toml
 	@$(venv_activated)
@@ -82,7 +80,6 @@ dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl dist
 
 pypibuild: venv dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl
 
-
 dist/.touchfile_push: dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl
 	@$(venv_activated)
 	# python3 -m twine upload --repository pypi dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)-py3-none-any.whl
@@ -91,12 +88,6 @@ dist/.touchfile_push: dist/mqttstuff-$(VERSION).tar.gz dist/mqttstuff-$(VERSION)
 
 pypipush: venv dist/.touchfile_push
 
-build: venv
-	./build.sh
-
-dstart:
-	# map config.local.yaml from current workdirectory into container
-	docker run --network=host -it --rm --name mqttstuffephemeral -v $(pwd)/config.local.yaml:/app/config.local.yaml xomoxcc/mqttstuff:latest /bin/bash
 
 # From https://hatch.pypa.io/latest/publish/#authentication
 # HATCH_INDEX_USER and HATCH_INDEX_AUTH
