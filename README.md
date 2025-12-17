@@ -42,7 +42,7 @@ Options:
 Simple publish and subscribe using the wrapper:
 
 ```python
-from mqttstuff.mosquittomqttwrapper import MosquittoClientWrapper
+from mqttstuff import MosquittoClientWrapper
 
 client = MosquittoClientWrapper(
     host="localhost", port=1883, username="user", password="pass",
@@ -63,7 +63,7 @@ client.publish_one("test/topic", {"hello": "world"}, retain=False)
 Read last retained or recent messages with a timeout:
 
 ```python
-from mqttstuff.mosquittomqttwrapper import MQTTLastDataReader
+from mqttstuff import MQTTLastDataReader
 
 data = MQTTLastDataReader.get_most_recent_data_with_timeout(
     host="localhost", port=1883, username="user", password="pass",
@@ -82,7 +82,7 @@ This repository does not provide a central `config.py` anymore. Pass your MQTT c
 
 Each Python module provided by this repository is documented here with a focused explanation of its purpose and usage.
 
-### Module: `mqttstuff.mosquittomqttwrapper`
+### Package: `mqttstuff`
 
 Key classes and responsibilities:
 
@@ -110,7 +110,7 @@ Key classes and responsibilities:
 Example – per-topic callback with type conversion:
 
 ```python
-from mqttstuff.mosquittomqttwrapper import MosquittoClientWrapper
+from mqttstuff import MosquittoClientWrapper
 
 client = MosquittoClientWrapper(
     host="localhost", port=1883, username="user", password="pass",
