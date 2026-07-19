@@ -60,6 +60,55 @@ client.connect_and_start_loop_forever()
 client.publish_one("test/topic", {"hello": "world"}, retain=False)
 ```
 
+### TLS/SSL
+
+Enable TLS with the keyword-only `tls` parameters — no reaching into `.client` required. Note: enabling TLS does not switch the port automatically; pass the broker's TLS port (typically 8883) yourself.
+
+```python
+from mqttstuff import MosquittoClientWrapper
+
+# Simplest case: server certificate validated against the system CA store
+client = MosquittoClientWrapper(
+    host="broker.example.com", port=8883, username="user", password="pass",
+    tls=True,
+)
+
+# Custom CA and/or mTLS client certificate (certfile and keyfile only together)
+client = MosquittoClientWrapper(
+    host="broker.example.com", port=8883, username="user", password="pass",
+    tls=True,
+    tls_ca_certs="/etc/ssl/my-ca.pem",
+    tls_certfile="/etc/ssl/client.pem",
+    tls_keyfile="/etc/ssl/client.key",
+)
+
+# Self-signed certs during development: disables hostname verification —
+# the connection stays encrypted but is MITM-able. Never use in production.
+client = MosquittoClientWrapper(
+    host="192.168.1.10", port=8883, username="user", password="pass",
+    tls=True, tls_insecure=True,
+)
+```
+
+For full control (ciphers, ALPN, `cert_reqs`, TLS version, encrypted keyfiles), pass a `MWTLSConfig` instead:
+
+```python
+from mqttstuff import MosquittoClientWrapper, MWTLSConfig
+
+client = MosquittoClientWrapper(
+    host="broker.example.com", port=8883, username="user", password="pass",
+    tls=MWTLSConfig(
+        ca_certs="/etc/ssl/my-ca.pem",
+        certfile="/etc/ssl/client.pem",
+        keyfile="/etc/ssl/client.key",
+        keyfile_password="secret",
+        alpn_protocols=["x-amzn-mqtt-ca"],
+    ),
+)
+```
+
+Mixing both styles (a `MWTLSConfig` plus `tls_*` parameters) or passing `tls_*` parameters while `tls=False` raises a `ValueError`. `MQTTLastDataReader.get_most_recent_data_with_timeout(...)` accepts the same `tls`/`tls_*` parameters.
+
 Read last retained or recent messages with a timeout:
 
 ```python
@@ -90,8 +139,14 @@ Key classes and responsibilities:
   - Normalized container for incoming/outgoing MQTT messages
   - Helpers like `from_pahomsg(...)` and fields for `topic`, `qos`, `retain`, `payload`, `value`, `created_at`, and optional `metadata`
 
+- `MWTLSConfig` (Pydantic model)
+  - TLS/SSL configuration (`ca_certs`, `certfile`/`keyfile` for mTLS, `keyfile_password`, `cert_reqs`, `tls_version`, `ciphers`, `alpn_protocols`, `tls_insecure`)
+  - Unset fields fall back to paho's secure defaults (system CA store, `ssl.CERT_REQUIRED`)
+  - Accepted by both `MosquittoClientWrapper(tls=...)` and `MQTTLastDataReader.get_most_recent_data_with_timeout(tls=...)`; alternatively use the flat keyword-only `tls=True` + `tls_ca_certs`/`tls_certfile`/`tls_keyfile`/`tls_insecure` parameters
+
 - `MosquittoClientWrapper`
   - Thin wrapper around `paho.mqtt.client.Client`
+  - Native TLS/SSL support via `tls=`/`tls_*` keyword-only parameters (see TLS/SSL section above)
   - Simplifies connection setup and topic subscriptions via `set_topics([...])`
   - Register callbacks per-topic (`add_message_callback(topic, callback, rettype=...)`) or a global callback (`set_on_msg_callback`)
   - Publish utilities:

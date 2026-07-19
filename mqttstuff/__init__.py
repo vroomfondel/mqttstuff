@@ -1,4 +1,4 @@
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 import os
 import sys
@@ -67,4 +67,4 @@ def configure_loguru_default_with_skiplog_filter(
     glogger.configure(extra={"classname": "None", "skiplog": False})
 
 
-from .mosquittomqttwrapper import MWMqttMessage, MosquittoClientWrapper, MQTTLastDataReader, _tz_berlin
+from .mosquittomqttwrapper import MWMqttMessage, MWTLSConfig, MosquittoClientWrapper, MQTTLastDataReader, _tz_berlin

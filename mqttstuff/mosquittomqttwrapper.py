@@ -2,16 +2,17 @@ import datetime
 import functools
 import json
 import pprint
+import ssl
 import threading
 import time
 from json import JSONDecodeError
 from threading import Condition
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union, ClassVar
+from typing import Any, Callable, ClassVar, Dict, List, Literal, Optional, Tuple, Union
 
 import pytz
 from paho.mqtt.client import Client, MQTTMessage, MQTTMessageInfo, MQTTv311
 from paho.mqtt.enums import CallbackAPIVersion
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 _tz_berlin: datetime.tzinfo = pytz.timezone("Europe/Berlin")
 
@@ -78,6 +79,145 @@ class MWMqttMessage(BaseModel):
         )
 
 
+class MWTLSConfig(BaseModel):
+    """TLS/SSL configuration for the MQTT connection.
+
+    All fields default to ``None``/``False``; unset fields are passed through to
+    :meth:`paho.mqtt.client.Client.tls_set`, which then applies its own secure
+    defaults (system CA store, ``ssl.CERT_REQUIRED``, ``ssl.PROTOCOL_TLS_CLIENT``).
+
+    Note:
+        Enabling TLS does not change the port — MQTT-over-TLS brokers typically
+        listen on 8883, which must be passed explicitly by the caller.
+
+    Attributes:
+        ca_certs: Path to a PEM-encoded CA bundle. ``None`` uses the system CA store.
+        certfile: Path to a PEM-encoded client certificate (mTLS). Requires ``keyfile``.
+        keyfile: Path to the client certificate's private key. Requires ``certfile``.
+        keyfile_password: Password for an encrypted ``keyfile``.
+        cert_reqs: Server certificate verification mode; paho defaults to
+            ``ssl.CERT_REQUIRED`` when unset.
+        tls_version: TLS protocol version constant (e.g. ``ssl.PROTOCOL_TLS_CLIENT``);
+            paho picks a secure default when unset.
+        ciphers: OpenSSL cipher string; ``None`` uses the defaults.
+        alpn_protocols: ALPN protocols to announce (e.g. for AWS IoT on port 443).
+        tls_insecure: Disable server hostname verification. The connection stays
+            encrypted but becomes MITM-able — development/testing only.
+    """
+
+    ca_certs: Optional[str] = None
+    certfile: Optional[str] = None
+    keyfile: Optional[str] = None
+    keyfile_password: Optional[str] = None
+    cert_reqs: Optional[ssl.VerifyMode] = None
+    tls_version: Optional[int] = None
+    ciphers: Optional[str] = None
+    alpn_protocols: Optional[List[str]] = None
+    tls_insecure: bool = False
+
+    @model_validator(mode="after")
+    def _check_cert_key_pair(self) -> "MWTLSConfig":
+        if (self.certfile is None) != (self.keyfile is None):
+            raise ValueError("certfile and keyfile must be provided together (mTLS needs both)")
+        return self
+
+
+def _resolve_tls_config(
+    tls: Union[bool, MWTLSConfig],
+    tls_ca_certs: Optional[str] = None,
+    tls_certfile: Optional[str] = None,
+    tls_keyfile: Optional[str] = None,
+    tls_insecure: bool = False,
+) -> Optional[MWTLSConfig]:
+    """Normalize the TLS parameter facade into a single :class:`MWTLSConfig`.
+
+    Args:
+        tls: ``False`` disables TLS, ``True`` enables it (configured via the
+            ``tls_*`` parameters), or a ready-made :class:`MWTLSConfig`.
+        tls_ca_certs: Path to a PEM CA bundle; ``None`` uses the system CA store.
+        tls_certfile: Client certificate for mTLS.
+        tls_keyfile: Private key belonging to ``tls_certfile``.
+        tls_insecure: Disable hostname verification (development only).
+
+    Returns:
+        Optional[MWTLSConfig]: The effective TLS configuration, or ``None`` if
+        TLS is disabled.
+
+    Raises:
+        ValueError: If ``tls_*`` parameters are combined with a
+            :class:`MWTLSConfig` instance, or given while ``tls`` is ``False``,
+            or if ``tls_certfile``/``tls_keyfile`` are not passed together.
+    """
+    facade_used: bool = tls_ca_certs is not None or tls_certfile is not None or tls_keyfile is not None or tls_insecure
+
+    if isinstance(tls, MWTLSConfig):
+        if facade_used:
+            raise ValueError("pass TLS options either as a MWTLSConfig via 'tls' OR via the tls_* parameters, not both")
+        return tls
+
+    if not tls:
+        if facade_used:
+            raise ValueError("tls_* parameters were given, but TLS is not enabled (tls=False)")
+        return None
+
+    return MWTLSConfig(ca_certs=tls_ca_certs, certfile=tls_certfile, keyfile=tls_keyfile, tls_insecure=tls_insecure)
+
+
+def _build_paho_client(
+    callback_userdata: Dict[str, Any],
+    username: Optional[str],
+    password: Optional[str],
+    tls: Optional[MWTLSConfig] = None,
+) -> Client:
+    """Create and configure a paho :class:`~paho.mqtt.client.Client`.
+
+    Shared factory for :class:`MosquittoClientWrapper` and
+    :class:`MQTTLastDataReader`. Each call returns a fresh client instance, so
+    ``tls_set()`` runs at most once per client (paho raises on a second call).
+
+    Args:
+        callback_userdata: Userdata dict passed to the paho client.
+        username: MQTT username.
+        password: MQTT password.
+        tls: TLS configuration; ``None`` keeps the connection plaintext.
+
+    Returns:
+        Client: The configured (not yet connected) paho client.
+    """
+    client: Client = Client(
+        callback_api_version=CallbackAPIVersion.VERSION2,
+        client_id="",
+        clean_session=True,
+        userdata=callback_userdata,
+        protocol=MQTTv311,
+        transport="tcp",
+        reconnect_on_failure=True,
+        manual_ack=False,
+    )
+
+    if tls is not None:
+        client.tls_set(
+            ca_certs=tls.ca_certs,
+            certfile=tls.certfile,
+            keyfile=tls.keyfile,
+            cert_reqs=tls.cert_reqs,
+            tls_version=tls.tls_version,
+            ciphers=tls.ciphers,
+            keyfile_password=tls.keyfile_password,
+            alpn_protocols=tls.alpn_protocols,
+        )
+        if tls.tls_insecure:
+            logger.warning(
+                "TLS hostname verification disabled (tls_insecure=True): "
+                "connection is encrypted but MITM-able — do not use in production"
+            )
+            client.tls_insecure_set(True)
+
+    client.username_pw_set(username, password)
+
+    return client
+
+
 class MosquittoClientWrapper:
     logger = logger.bind(classname=__qualname__)
 
@@ -89,7 +229,37 @@ class MosquittoClientWrapper:
         password: Optional[str] = None,
         topics: Optional[List[str]] = None,
         timeout_connect_seconds: Optional[int] = None,
-    ):
+        *,
+        tls: Union[bool, MWTLSConfig] = False,
+        tls_ca_certs: Optional[str] = None,
+        tls_certfile: Optional[str] = None,
+        tls_keyfile: Optional[str] = None,
+        tls_insecure: bool = False,
+    ) -> None:
+        """Initialize the wrapper and set up the underlying paho client.
+
+        Args:
+            host: MQTT broker host.
+            port: MQTT broker port. Note: enabling TLS does not switch the port
+                automatically — pass the broker's TLS port (typically 8883) yourself.
+            username: MQTT username.
+            password: MQTT password.
+            topics: Topics to subscribe to on connect.
+            timeout_connect_seconds: Timeout for waiting on the initial connect.
+            tls: ``False`` (default) disables TLS, ``True`` enables it configured
+                via the ``tls_*`` parameters, or pass a :class:`MWTLSConfig` for
+                full control (ciphers, ALPN, cert_reqs, ...).
+            tls_ca_certs: Path to a PEM CA bundle; ``None`` uses the system CA store.
+            tls_certfile: Client certificate for mTLS (requires ``tls_keyfile``).
+            tls_keyfile: Private key for ``tls_certfile``.
+            tls_insecure: Disable server hostname verification — connection stays
+                encrypted but is MITM-able. Development/testing only.
+
+        Raises:
+            ValueError: On inconsistent TLS parameters (``tls_*`` given while
+                ``tls=False``, ``tls_*`` combined with a :class:`MWTLSConfig`,
+                or certfile/keyfile not passed together).
+        """
         self.timeout_connect_seconds: Optional[int] = timeout_connect_seconds
         self.topics: Optional[List[str]] = topics
         self.client: Optional[Client] = None
@@ -102,6 +272,10 @@ class MosquittoClientWrapper:
         self.port: Optional[int] = port
         self.username: Optional[str] = username
         self.password: Optional[str] = password
+
+        self.tls: Optional[MWTLSConfig] = _resolve_tls_config(
+            tls, tls_ca_certs, tls_certfile, tls_keyfile, tls_insecure
+        )
 
         self._setup_mqtt_client()
 
@@ -162,18 +336,15 @@ class MosquittoClientWrapper:
             self.client.subscribe(to_subscribe_add)
 
     def _setup_mqtt_client(self) -> None:
+        """(Re-)create the underlying paho client.
+
+        Builds a fresh :class:`~paho.mqtt.client.Client` on every call (via
+        :func:`_build_paho_client`), so TLS setup runs exactly once per client
+        instance even if this method is called multiple times.
+        """
         self.callback_userdata = {"cond_connected": threading.Condition(), "topics": self.topics, "qos": 1}
 
-        self.client = Client(
-            callback_api_version=CallbackAPIVersion.VERSION2,
-            client_id="",
-            clean_session=True,
-            userdata=self.callback_userdata,
-            protocol=MQTTv311,
-            transport="tcp",
-            reconnect_on_failure=True,
-            manual_ack=False,
-        )
+        self.client = _build_paho_client(self.callback_userdata, self.username, self.password, self.tls)
 
         if self.noisy_client:
             self.client.enable_logger()
@@ -187,8 +358,6 @@ class MosquittoClientWrapper:
         # client.on_message = lambda _client, _usd, _msg: self.logger.debug(
         #     f"{threading.get_ident()=} {_msg.topic=} {_msg.payload=}"
         # )
-
-        self.client.username_pw_set(self.username, self.password)
 
     def _on_msg_callback_wrapper(
         self,
@@ -405,6 +574,12 @@ class MQTTLastDataReader:
         rettype: Literal["json", "str", "int", "float", "valuemsg", "str_raw"] = "str_raw",
         fallback_rettype: Literal["json", "str", "int", "float", "valuemsg", "str_raw"] = "str_raw",
         created_at_fieldname: str = "created_at",
+        *,
+        tls: Union[bool, MWTLSConfig] = False,
+        tls_ca_certs: Optional[str] = None,
+        tls_certfile: Optional[str] = None,
+        tls_keyfile: Optional[str] = None,
+        tls_insecure: bool = False,
     ) -> Optional[list[MWMqttMessage]]:
         if noisy:
             cls.logger.debug(
@@ -481,24 +656,17 @@ class MQTTLastDataReader:
             "cond_msg": Condition(),
         }
 
-        client: Client = Client(
-            callback_api_version=CallbackAPIVersion.VERSION2,
-            client_id="",
-            clean_session=True,
-            userdata=callback_userdata,
-            protocol=MQTTv311,
-            transport="tcp",
-            reconnect_on_failure=True,
-            manual_ack=False,
+        tls_config: Optional[MWTLSConfig] = _resolve_tls_config(
+            tls, tls_ca_certs, tls_certfile, tls_keyfile, tls_insecure
         )
+
+        client: Client = _build_paho_client(callback_userdata, username, password, tls_config)
 
         if noisy:
             client.enable_logger()
 
         client.on_connect = on_connect
         client.on_message = on_msg
-
-        client.username_pw_set(username, password)
 
         connected: bool = False
         with callback_userdata["cond_connected"]:
