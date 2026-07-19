@@ -82,11 +82,20 @@ client = MosquittoClientWrapper(
     tls_keyfile="/etc/ssl/client.key",
 )
 
-# Self-signed certs during development: disables hostname verification —
-# the connection stays encrypted but is MITM-able. Never use in production.
+# Self-signed / unknown-CA / reverse-proxy default certs during development:
+# skips verification completely — no hostname check and no chain validation
+# (implies cert_reqs=ssl.CERT_NONE). The connection stays encrypted but is
+# MITM-able. Never use in production.
 client = MosquittoClientWrapper(
     host="192.168.1.10", port=8883, username="user", password="pass",
     tls=True, tls_insecure=True,
+)
+
+# Chain validation but no hostname check: set cert_reqs explicitly — an explicit
+# cert_reqs always wins over the CERT_NONE implied by tls_insecure.
+client = MosquittoClientWrapper(
+    host="192.168.1.10", port=8883,
+    tls=MWTLSConfig(cert_reqs=ssl.CERT_REQUIRED, tls_insecure=True),
 )
 ```
 

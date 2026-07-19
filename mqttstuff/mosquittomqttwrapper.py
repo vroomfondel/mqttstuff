@@ -96,13 +96,20 @@ class MWTLSConfig(BaseModel):
         keyfile: Path to the client certificate's private key. Requires ``certfile``.
         keyfile_password: Password for an encrypted ``keyfile``.
         cert_reqs: Server certificate verification mode; paho defaults to
-            ``ssl.CERT_REQUIRED`` when unset.
+            ``ssl.CERT_REQUIRED`` when unset. Setting this explicitly wins over
+            ``tls_insecure`` (which otherwise implies ``ssl.CERT_NONE``), so
+            ``cert_reqs=ssl.CERT_REQUIRED`` + ``tls_insecure=True`` still
+            validates the chain while skipping only the hostname check.
         tls_version: TLS protocol version constant (e.g. ``ssl.PROTOCOL_TLS_CLIENT``);
             paho picks a secure default when unset.
         ciphers: OpenSSL cipher string; ``None`` uses the defaults.
         alpn_protocols: ALPN protocols to announce (e.g. for AWS IoT on port 443).
-        tls_insecure: Disable server hostname verification. The connection stays
-            encrypted but becomes MITM-able — development/testing only.
+        tls_insecure: Skip server certificate verification entirely — no hostname
+            check and no chain/CA validation (implies ``cert_reqs=ssl.CERT_NONE``
+            unless ``cert_reqs`` is set explicitly). This accepts self-signed,
+            expired and unknown-CA certificates, e.g. a reverse proxy serving its
+            default throwaway certificate. The connection stays encrypted but
+            becomes MITM-able — development/testing only.
     """
 
     ca_certs: Optional[str] = None
@@ -137,7 +144,8 @@ def _resolve_tls_config(
         tls_ca_certs: Path to a PEM CA bundle; ``None`` uses the system CA store.
         tls_certfile: Client certificate for mTLS.
         tls_keyfile: Private key belonging to ``tls_certfile``.
-        tls_insecure: Disable hostname verification (development only).
+        tls_insecure: Skip certificate verification entirely — no hostname check
+            and no chain validation (development only).
 
     Returns:
         Optional[MWTLSConfig]: The effective TLS configuration, or ``None`` if
@@ -196,11 +204,19 @@ def _build_paho_client(
     )
 
     if tls is not None:
+        # tls_insecure means "skip verification", not just "skip the hostname check":
+        # without CERT_NONE the chain is still validated and self-signed / unknown-CA
+        # certificates (e.g. a reverse proxy's default certificate) keep failing.
+        # An explicit cert_reqs always wins, so chain-only verification stays possible.
+        cert_reqs: Optional[ssl.VerifyMode] = tls.cert_reqs
+        if tls.tls_insecure and cert_reqs is None:
+            cert_reqs = ssl.CERT_NONE
+
         client.tls_set(
             ca_certs=tls.ca_certs,
             certfile=tls.certfile,
             keyfile=tls.keyfile,
-            cert_reqs=tls.cert_reqs,
+            cert_reqs=cert_reqs,
             tls_version=tls.tls_version,
             ciphers=tls.ciphers,
             keyfile_password=tls.keyfile_password,
@@ -208,8 +224,9 @@ def _build_paho_client(
         )
         if tls.tls_insecure:
             logger.warning(
-                "TLS hostname verification disabled (tls_insecure=True): "
-                "connection is encrypted but MITM-able — do not use in production"
+                "TLS certificate verification disabled (tls_insecure=True, cert_reqs={}): "
+                "connection is encrypted but MITM-able — do not use in production",
+                cert_reqs,
             )
             client.tls_insecure_set(True)
 
@@ -252,7 +269,9 @@ class MosquittoClientWrapper:
             tls_ca_certs: Path to a PEM CA bundle; ``None`` uses the system CA store.
             tls_certfile: Client certificate for mTLS (requires ``tls_keyfile``).
             tls_keyfile: Private key for ``tls_certfile``.
-            tls_insecure: Disable server hostname verification — connection stays
+            tls_insecure: Skip server certificate verification entirely — neither
+                hostname nor chain/CA is checked, so self-signed, expired and
+                unknown-CA certificates are accepted. The connection stays
                 encrypted but is MITM-able. Development/testing only.
 
         Raises:

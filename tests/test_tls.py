@@ -26,7 +26,7 @@ def test_tls_true_sets_context_with_hostname_check() -> None:
     assert ctx.verify_mode == ssl.CERT_REQUIRED
 
 
-def test_tls_insecure_disables_hostname_check() -> None:
+def test_tls_insecure_disables_hostname_and_chain_check() -> None:
     wrapper = MosquittoClientWrapper(
         host="localhost", port=8883, username="u", password="p", tls=True, tls_insecure=True
     )
@@ -35,6 +35,16 @@ def test_tls_insecure_disables_hostname_check() -> None:
     ctx = wrapper.client._ssl_context
     assert isinstance(ctx, ssl.SSLContext)
     assert ctx.check_hostname is False
+    assert ctx.verify_mode == ssl.CERT_NONE
+
+
+def test_explicit_cert_reqs_wins_over_tls_insecure() -> None:
+    client = _build_paho_client({}, "u", "p", MWTLSConfig(cert_reqs=ssl.CERT_REQUIRED, tls_insecure=True))
+
+    ctx = client._ssl_context
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.check_hostname is False
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
 
 
 def test_certfile_without_keyfile_raises() -> None:
@@ -108,6 +118,7 @@ def test_wrapper_accepts_mwtlsconfig_model() -> None:
     ctx = wrapper.client._ssl_context
     assert isinstance(ctx, ssl.SSLContext)
     assert ctx.check_hostname is False
+    assert ctx.verify_mode == ssl.CERT_NONE
 
 
 # --- gemeinsame Client-Factory (wird auch vom MQTTLastDataReader genutzt) ---

@@ -71,7 +71,11 @@ if __name__ == "__main__":
         "--tls-certfile", type=str, default=None, help="Client certificate for mTLS (requires --tls-keyfile)"
     )
     parser.add_argument("--tls-keyfile", type=str, default=None, help="Private key for --tls-certfile")
-    parser.add_argument("--tls-insecure", action="store_true", help="Disable hostname verification (dev only)")
+    parser.add_argument(
+        "--tls-insecure",
+        action="store_true",
+        help="Skip certificate verification entirely: no hostname check, no chain validation (dev only)",
+    )
 
     args = parser.parse_args()
 
